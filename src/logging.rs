@@ -1,5 +1,6 @@
 use serde::Serialize;
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Serialize)]
 struct LogEvent<'a> {
@@ -11,7 +12,17 @@ struct LogEvent<'a> {
     metadata: Option<Value>,
 }
 
+static SILENT: AtomicBool = AtomicBool::new(false);
+
+pub fn set_silent(value: bool) {
+    SILENT.store(value, Ordering::Relaxed);
+}
+
 fn emit(level: &str, event: &str, message: &str, metadata: Option<Value>) {
+    if SILENT.load(Ordering::Relaxed) && level != "error" {
+        return;
+    }
+
     let entry = LogEvent {
         level,
         event,

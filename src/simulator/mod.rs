@@ -8,6 +8,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use rayon::prelude::*;
 use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{UnixListener, UnixStream};
@@ -201,19 +202,29 @@ async fn run_tick_generator(
             draws[i] = rng.sample(StandardNormal);
         }
         let correlated = &cholesky * draws;
+        let correlated_slice = correlated.as_slice();
+        let timestamp_base = current_timestamp_ms();
 
-        for (idx, equity) in equities.iter().enumerate() {
-            let price = &mut prices[idx];
-            *price = (*price * (1.0 + correlated[idx] * 0.002)).max(0.01);
-            let tick = Tick {
-                symbol: equity.symbol.clone(),
-                price: *price,
-                timestamp_ms: current_timestamp_ms(),
-                region: equity.region,
-                sector: equity.sector,
-            };
+        let ticks: Vec<Tick> = prices
+            .par_iter_mut()
+            .zip(equities.par_iter())
+            .zip(correlated_slice.par_iter())
+            .enumerate()
+            .map(|(idx, ((price, equity), corr))| {
+                *price = (*price * (1.0 + *corr * 0.002)).max(0.01);
+                Tick {
+                    symbol: equity.symbol.clone(),
+                    price: *price,
+                    timestamp_ms: timestamp_base + idx as u128,
+                    region: equity.region,
+                    sector: equity.sector,
+                }
+            })
+            .collect();
+
+        emitted_ticks = emitted_ticks.saturating_add(ticks.len());
+        for tick in ticks {
             let _ = sender.send(tick);
-            emitted_ticks = emitted_ticks.saturating_add(1);
         }
 
         if let Some(max) = max_ticks {

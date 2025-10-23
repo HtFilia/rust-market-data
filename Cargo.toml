@@ -13,3 +13,11 @@ anyhow = "1.0"
 tokio = { version = "1.38", features = ["macros", "rt-multi-thread", "net", "time", "io-util", "sync", "signal"] }
 clap = { version = "4.5", features = ["derive"] }
 textplots = "0.8"
+rayon = "1.10"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "tick_benchmark"
+harness = false
