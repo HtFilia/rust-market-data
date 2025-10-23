@@ -1,0 +1,16 @@
+# Compiled artifacts
+/target/
+
+# IDE and editor plumbing
+.idea/
+.vscode/
+**/*.swp
+**/*.swo
+**/*~
+
+# macOS metadata
+.DS_Store
+
+# Logs / temp dumps
+/log/
+*.log
