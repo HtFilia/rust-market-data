@@ -19,11 +19,13 @@ fn bench_tick_generation(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let mut total = Duration::ZERO;
             for _ in 0..iters {
-                let mut config = SimulatorConfig::default();
-                config.enable_socket = false;
-                config.tick_interval = Duration::from_micros(1);
-                config.correlation_refresh = Duration::from_secs(3600);
-                config.max_ticks = Some(batch_size);
+                let config = SimulatorConfig {
+                    enable_socket: false,
+                    tick_interval: Duration::from_micros(1),
+                    correlation_refresh: Duration::from_secs(3600),
+                    max_ticks: Some(batch_size),
+                    ..SimulatorConfig::default()
+                };
 
                 let elapsed = rt.block_on(async {
                     let start = Instant::now();

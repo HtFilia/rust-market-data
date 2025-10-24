@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+if ! command -v cargo >/dev/null 2>&1; then
+    echo "[post-commit] cargo not found; skipping Rust checks."
+    exit 0
+fi
+
+echo "[post-commit] Running post-commit quality checks…"
+
+if ! cargo fmt --all -- --check; then
+    echo "[post-commit] Formatting check failed. Consider amending the commit."
+    exit 1
+fi
+
+if ! cargo clippy --workspace --all-targets -- -D warnings; then
+    echo "[post-commit] Clippy reported issues. Consider amending the commit."
+    exit 1
+fi
+
+if [[ -z "${SKIP_POST_COMMIT_TESTS:-}" ]]; then
+    if ! cargo test --workspace; then
+        echo "[post-commit] Tests failed. Consider amending the commit."
+        exit 1
+    fi
+else
+    echo "[post-commit] SKIP_POST_COMMIT_TESTS set; skipping cargo test."
+fi
+
+echo "[post-commit] Quality checks completed successfully."

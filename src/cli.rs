@@ -16,18 +16,13 @@ impl Cli {
     }
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Default)]
 pub enum Command {
     /// Run the tick generator and socket publisher
+    #[default]
     Run,
     /// Subscribe to the unix socket and print incoming ticks
     Tail(TailArgs),
     /// Collect ticks and render an ASCII price chart
     Chart(ChartArgs),
-}
-
-impl Default for Command {
-    fn default() -> Self {
-        Command::Run
-    }
 }

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+if ! command -v cargo >/dev/null 2>&1; then
+    echo "[pre-commit] cargo not found; skipping Rust checks."
+    exit 0
+fi
+
+echo "[pre-commit] cargo fmt --all -- --check"
+cargo fmt --all -- --check
+
+echo "[pre-commit] cargo clippy --workspace --all-targets -- -D warnings"
+cargo clippy --workspace --all-targets -- -D warnings
+
+if [[ -z "${SKIP_PRE_COMMIT_TESTS:-}" ]]; then
+    echo "[pre-commit] cargo test --workspace"
+    cargo test --workspace
+else
+    echo "[pre-commit] SKIP_PRE_COMMIT_TESTS set; skipping cargo test."
+fi
+
+echo "[pre-commit] All checks passed."

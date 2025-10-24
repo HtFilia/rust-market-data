@@ -453,8 +453,8 @@ pub mod testkit {
         }
 
         let _ = shutdown_tx.send(ShutdownSignal::Graceful);
-        let _ = generator_handle.await??;
-        let _ = correlation_handle.await??;
+        generator_handle.await??;
+        correlation_handle.await??;
 
         Ok(collected)
     }

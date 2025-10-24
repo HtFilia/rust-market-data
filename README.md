@@ -72,3 +72,23 @@ Each line contains a JSON payload of the form:
 - `src/tail.rs` and `src/chart.rs` implement the inspection utilities that subscribe to the Unix socket.
 - `src/tick.rs` and `src/constants.rs` capture shared data types and configuration.
 - `schemas/` contains JSON Schemas and example payloads for ticks and structured logs.
+
+## Git hooks
+
+Recommended local quality gates live in `.githooks/`. Enable them with:
+
+```bash
+make install
+```
+
+The `pre-commit` hook enforces `cargo fmt`, `cargo clippy -D warnings`, and `cargo test`. The `post-commit` hook re-runs the same checks (set `SKIP_PRE_COMMIT_TESTS=1` or `SKIP_POST_COMMIT_TESTS=1` to skip tests when needed).
+
+## Make targets
+
+- `make install` – configure git hooks
+- `make build` – `cargo build --workspace`
+- `make run` / `make tail` / `make chart` – convenience wrappers for the CLI subcommands
+- `make test` – run the test suite
+- `make fmt` / `make lint` – formatting and Clippy lint gate
+- `make bench` – run benchmarks
+- `make clean` – remove build artefacts
