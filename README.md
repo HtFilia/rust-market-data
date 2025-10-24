@@ -81,7 +81,7 @@ Recommended local quality gates live in `.githooks/`. Enable them with:
 make install
 ```
 
-The `pre-commit` hook enforces `cargo fmt`, `cargo clippy -D warnings`, and `cargo test`. The `post-commit` hook re-runs the same checks (set `SKIP_PRE_COMMIT_TESTS=1` or `SKIP_POST_COMMIT_TESTS=1` to skip tests when needed).
+The `pre-commit` hook enforces `cargo fmt`, `cargo clippy -D warnings`, and `cargo test`. The `commit-msg` hook requires messages to follow `[MVP1] verb: description` (verbs allowed: add, remove, change, fix, doc, refactor, chore, test, upgrade, downgrade, init, merge). The `post-commit` hook re-runs the same checks (set `SKIP_PRE_COMMIT_TESTS=1` or `SKIP_POST_COMMIT_TESTS=1` to skip tests when needed).
 
 ## Make targets
 
