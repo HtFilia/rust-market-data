@@ -69,7 +69,7 @@ pub async fn run_with_config(config: SimulatorConfig) -> Result<()> {
     let (shutdown_tx, shutdown_rx) = watch::channel(ShutdownSignal::None);
     let (reload_tx, _) = broadcast::channel::<()>(16);
 
-    let (tick_sender, _) = broadcast::channel::<Tick>(1024);
+    let (tick_sender, _) = broadcast::channel::<Tick>(4096);
     let server_sender = tick_sender.clone();
 
     let signals_task = tokio::spawn(handle_signals(shutdown_tx.clone(), reload_tx.clone()));
@@ -427,7 +427,7 @@ pub mod testkit {
 
         let (shutdown_tx, shutdown_rx) = watch::channel(ShutdownSignal::None);
         let (reload_tx, _) = broadcast::channel::<()>(1);
-        let (tick_sender, _) = broadcast::channel::<Tick>(1024);
+        let (tick_sender, _) = broadcast::channel::<Tick>(4096);
         let mut receiver = tick_sender.subscribe();
 
         let generator_handle = tokio::spawn(run_tick_generator(

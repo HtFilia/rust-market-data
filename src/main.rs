@@ -5,7 +5,7 @@ use rust_market_data::cli::{self, Cli};
 use rust_market_data::simulator;
 use rust_market_data::tail;
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 6)]
 async fn main() -> Result<()> {
     match Cli::parse().command() {
         cli::Command::Run => simulator::run().await,

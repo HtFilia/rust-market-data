@@ -6,7 +6,7 @@ This crate generates correlated market data ticks for a sizeable universe of equ
 
 - Synthesises a 500-name equity universe with geography and sector metadata.
 - Generates a positive-definite correlation matrix using factor loadings with regional and sector rules, refreshing it periodically.
-- Samples correlated Gaussian returns at a high cadence (default 5ms) to evolve prices.
+- Samples correlated Gaussian returns at a high cadence (default 8ms) to evolve prices.
 - Publishes JSON-encoded ticks over a Unix socket so external processes can subscribe in real time.
 - Emits structured JSON logs suitable for downstream ingestion pipelines.
 
