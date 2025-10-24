@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Tick",
+  "type": "object",
+  "required": [
+    "symbol",
+    "price",
+    "timestamp_ms",
+    "region",
+    "sector"
+  ],
+  "properties": {
+    "symbol": {
+      "type": "string",
+      "description": "Unique equity symbol (e.g. NA_TECH000)."
+    },
+    "price": {
+      "type": "number",
+      "description": "Latest traded price in quote currency."
+    },
+    "timestamp_ms": {
+      "type": "integer",
+      "description": "Unix epoch timestamp in milliseconds."
+    },
+    "region": {
+      "type": "string",
+      "enum": [
+        "north_america",
+        "south_america",
+        "europe",
+        "asia_pacific",
+        "middle_east_africa"
+      ],
+      "description": "Geographical region of the issuer."
+    },
+    "sector": {
+      "type": "string",
+      "enum": [
+        "technology",
+        "financials",
+        "industrials",
+        "healthcare",
+        "consumer_discretionary",
+        "consumer_staples",
+        "energy",
+        "utilities",
+        "materials",
+        "real_estate"
+      ],
+      "description": "Activity sector classification."
+    }
+  },
+  "additionalProperties": false
+}

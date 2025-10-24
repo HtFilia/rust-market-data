@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LogEvent",
+  "type": "object",
+  "required": [
+    "level",
+    "event",
+    "message",
+    "timestamp_ms"
+  ],
+  "properties": {
+    "level": {
+      "type": "string",
+      "enum": [
+        "info",
+        "warn",
+        "error"
+      ],
+      "description": "Structured log level."
+    },
+    "event": {
+      "type": "string",
+      "description": "Short identifier describing the log event type."
+    },
+    "message": {
+      "type": "string",
+      "description": "Human-readable explanation."
+    },
+    "timestamp_ms": {
+      "type": "integer",
+      "description": "Unix epoch timestamp in milliseconds."
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Optional JSON payload with event-specific data.",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

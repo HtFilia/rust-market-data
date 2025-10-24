@@ -21,6 +21,7 @@ cargo run
 The process binds to `market_ticks.sock` inside the project directory. The other subcommands expect that socket to be available.
 
 The runtime responds to common Unix signals when running the simulator:
+
 - `SIGTERM` performs a graceful shutdown, letting background tasks finish and removing the socket file.
 - `SIGHUP` triggers a hot reload of the correlation structure.
 - `SIGINT` (Ctrl+C) exits immediately after cleaning up the socket.
@@ -70,3 +71,4 @@ Each line contains a JSON payload of the form:
 - `src/simulator/` hosts the core market model (universe construction, tick loop, socket server).
 - `src/tail.rs` and `src/chart.rs` implement the inspection utilities that subscribe to the Unix socket.
 - `src/tick.rs` and `src/constants.rs` capture shared data types and configuration.
+- `schemas/` contains JSON Schemas and example payloads for ticks and structured logs.

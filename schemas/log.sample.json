@@ -1,0 +1,9 @@
+{
+  "level": "info",
+  "event": "socket.bind",
+  "message": "Listening for tick subscribers",
+  "timestamp_ms": 1716400001000,
+  "metadata": {
+    "path": "market_ticks.sock"
+  }
+}
