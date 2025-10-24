@@ -1,5 +1,7 @@
 # Compiled artifacts
 /target/
+**/target/
+frontend/dist/
 
 # IDE and editor plumbing
 .idea/
@@ -12,5 +14,5 @@
 .DS_Store
 
 # Logs / temp dumps
-/log/
+log/
 *.log

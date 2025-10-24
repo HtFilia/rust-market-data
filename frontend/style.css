@@ -1,0 +1,122 @@
+:root {
+  color-scheme: dark light;
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  background-color: #0f172a;
+  color: #e2e8f0;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+}
+
+.app-root {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  padding: 2rem;
+  box-sizing: border-box;
+}
+
+.dashboard {
+  width: min(1200px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.dashboard__header h1 {
+  margin: 0;
+  font-size: 2rem;
+  letter-spacing: 0.03em;
+}
+
+.dashboard__header p {
+  margin: 0.35rem 0 0;
+  color: #94a3b8;
+}
+
+.dashboard__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.5rem;
+}
+
+.tick-table,
+.history-chart {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 18px;
+  padding: 1.25rem;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.6);
+}
+
+.tick-table h2,
+.history-chart h2 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  font-size: 1.25rem;
+  color: #f8fafc;
+}
+
+.tick-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.tick-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  color: #94a3b8;
+  padding-bottom: 0.75rem;
+}
+
+.tick-table td {
+  padding: 0.6rem 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.08);
+}
+
+.tick-table tr {
+  cursor: pointer;
+  transition: background 110ms ease;
+}
+
+.tick-table tr:hover {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.tick-table tr.selected {
+  background: rgba(56, 189, 248, 0.15);
+}
+
+.history-chart__placeholder {
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  padding: 1rem;
+  background: rgba(148, 163, 184, 0.12);
+  gap: 0.4rem;
+}
+
+.history-chart__placeholder strong {
+  font-size: 1.1rem;
+  letter-spacing: 0.05em;
+}
+
+.history-chart p {
+  margin: 0;
+  color: #cbd5f5;
+}
+
+@media (max-width: 960px) {
+  .dashboard__body {
+    grid-template-columns: 1fr;
+  }
+}

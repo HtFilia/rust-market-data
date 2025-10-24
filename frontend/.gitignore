@@ -1,0 +1,7 @@
+# Trunk / WASM build outputs
+/frontend/dist
+.trunk
+
+# Miscellaneous
+wasm-pack.log
+**/*.rs.bk

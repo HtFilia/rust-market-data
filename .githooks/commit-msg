@@ -2,8 +2,8 @@
 set -euo pipefail
 
 COMMIT_MSG_FILE="$1"
-MVP_VERSION="1"
-ALLOWED_VERBS="add|remove|change|fix|doc|refactor|chore|test|upgrade|downgrade|init|merge|revert"
+MVP_VERSION="2"
+ALLOWED_VERBS="add|remove|change|fix|doc|refactor|chore|test|upgrade|downgrade|init|merge|revert|build|release"
 
 COMMIT_SUMMARY="$(head -n1 "$COMMIT_MSG_FILE" | tr -d '\r')"
 
