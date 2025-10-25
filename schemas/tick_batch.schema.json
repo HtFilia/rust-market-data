@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TickBatch",
+  "type": "object",
+  "required": ["version", "ticks"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "enum": [1]
+    },
+    "ticks": {
+      "type": "array",
+      "items": { "$ref": "tick.schema.json" }
+    }
+  },
+  "additionalProperties": false
+}

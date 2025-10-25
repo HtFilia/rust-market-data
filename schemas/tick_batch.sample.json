@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "ticks": [
+    {
+      "symbol": "NA_TECH007",
+      "price": 134.2875,
+      "timestamp_ms": 1716400005123,
+      "region": "north_america",
+      "sector": "technology"
+    },
+    {
+      "symbol": "EU_IND002",
+      "price": 98.4401,
+      "timestamp_ms": 1716400005456,
+      "region": "europe",
+      "sector": "industrials"
+    }
+  ]
+}

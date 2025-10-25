@@ -10,12 +10,13 @@ use axum::{
     Router,
 };
 use futures_util::{SinkExt, StreamExt};
+use serde::Serialize;
 use serde_json::json;
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::{interval, MissedTickBehavior};
 
-use crate::{logging, tick::Tick};
+use crate::{constants::TICK_BATCH_VERSION, logging, tick::Tick};
 
 use super::{
     metrics::{MetricsEvent, MetricsTx},
@@ -177,6 +178,12 @@ pub(super) struct GatewayShutdown {
     pub aggregator: watch::Receiver<ShutdownSignal>,
     pub dispatcher: watch::Receiver<ShutdownSignal>,
     pub server: watch::Receiver<ShutdownSignal>,
+}
+
+#[derive(Serialize)]
+struct TickBatchPayload {
+    version: u32,
+    ticks: Vec<Tick>,
 }
 
 struct RateTracker {
@@ -369,7 +376,11 @@ async fn forward_ticks_to_client(
                 if batch.is_empty() {
                     continue;
                 }
-                let payload = serde_json::to_string(&batch).context("serialize tick payload")?;
+                let payload = serde_json::to_string(&TickBatchPayload {
+                    version: TICK_BATCH_VERSION,
+                    ticks: batch,
+                })
+                .context("serialize tick payload")?;
                 if ws_sender.send(Message::Text(payload)).await.is_err() {
                     break;
                 }

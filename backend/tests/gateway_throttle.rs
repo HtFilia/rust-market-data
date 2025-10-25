@@ -10,6 +10,7 @@ use rust_market_data::{
     simulator::{self, SimulatorConfig},
     tick::Tick,
 };
+use serde::Deserialize;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -52,7 +53,14 @@ async fn gateway_batches_symbols_once_per_interval() {
         if let Some(message) = ws_stream.next().await {
             let message = message.expect("websocket message");
             if let Message::Text(payload) = message {
-                let ticks: Vec<Tick> = serde_json::from_str(&payload).expect("tick payload batch");
+                let batch: TickBatchPayload =
+                    serde_json::from_str(&payload).expect("tick payload batch");
+                assert_eq!(
+                    batch.version, 1,
+                    "unexpected batch version {}",
+                    batch.version
+                );
+                let ticks = batch.ticks;
                 let unique: HashSet<_> = ticks.iter().map(|tick| tick.symbol.as_str()).collect();
                 if unique.len() >= 400 {
                     frames.push((Instant::now(), ticks));
@@ -95,4 +103,9 @@ async fn gateway_batches_symbols_once_per_interval() {
     let _ = ws_stream.close(None).await;
     simulator_task.abort();
     let _ = simulator_task.await;
+}
+#[derive(Deserialize)]
+struct TickBatchPayload {
+    version: u32,
+    ticks: Vec<Tick>,
 }
