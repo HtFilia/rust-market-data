@@ -1,6 +1,6 @@
 use std::collections::hash_map::HashMap;
 use std::net::SocketAddr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use axum::{
@@ -12,7 +12,7 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use tokio::net::TcpListener;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::{interval, MissedTickBehavior};
 
 use crate::{logging, tick::Tick};
@@ -53,22 +53,29 @@ mod tests {
 pub(super) async fn run_gateway(
     addr: SocketAddr,
     throttle: Duration,
+    queue_depth: usize,
     source_sender: broadcast::Sender<Tick>,
     metrics: MetricsTx,
-    aggregator_shutdown: watch::Receiver<ShutdownSignal>,
-    server_shutdown: watch::Receiver<ShutdownSignal>,
+    shutdowns: GatewayShutdown,
 ) -> Result<()> {
-    let (gateway_sender, _) = broadcast::channel::<Vec<Tick>>(64);
+    let (gateway_sender, _) = broadcast::channel::<Vec<Tick>>(queue_depth * 2);
+    let (queue_tx, queue_rx) = mpsc::channel::<Vec<Tick>>(queue_depth);
 
     tokio::try_join!(
         run_gateway_aggregator(
             throttle,
             source_sender.subscribe(),
+            queue_tx,
+            metrics.clone(),
+            shutdowns.aggregator,
+        ),
+        run_gateway_dispatcher(
+            queue_rx,
             gateway_sender.clone(),
             metrics.clone(),
-            aggregator_shutdown
+            shutdowns.dispatcher,
         ),
-        run_gateway_server(addr, gateway_sender, metrics, server_shutdown),
+        run_gateway_server(addr, gateway_sender, metrics, shutdowns.server),
     )?;
 
     Ok(())
@@ -77,7 +84,7 @@ pub(super) async fn run_gateway(
 async fn run_gateway_aggregator(
     throttle: Duration,
     mut source: broadcast::Receiver<Tick>,
-    gateway_sender: broadcast::Sender<Vec<Tick>>,
+    queue_sender: mpsc::Sender<Vec<Tick>>,
     metrics: MetricsTx,
     mut shutdown: watch::Receiver<ShutdownSignal>,
 ) -> Result<()> {
@@ -87,6 +94,8 @@ async fn run_gateway_aggregator(
     let mut ticker = interval(throttle);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
     ticker.reset();
+    let mut lag_tracker = RateTracker::new(Duration::from_secs(1));
+    let mut drop_tracker = RateTracker::new(Duration::from_secs(1));
 
     loop {
         tokio::select! {
@@ -94,8 +103,22 @@ async fn run_gateway_aggregator(
                 if !accumulator.is_empty() {
                     let snapshot = accumulator.snapshot();
                     if !snapshot.is_empty() {
-                        metrics.report(MetricsEvent::GatewayBatch { symbols: snapshot.len() });
-                        let _ = gateway_sender.send(snapshot);
+                        match queue_sender.try_send(snapshot) {
+                            Ok(_) => {}
+                            Err(mpsc::error::TrySendError::Full(_)) => {
+                                metrics.report(MetricsEvent::GatewayBackpressure { dropped: 1 });
+                                if let Some((total, _)) = drop_tracker.record(1) {
+                                    logging::warn(
+                                        "gateway.queue.full",
+                                        "Gateway queue saturated, dropping batches",
+                                        json!({ "dropped_batches": total })
+                                    );
+                                }
+                            }
+                            Err(mpsc::error::TrySendError::Closed(_)) => {
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -109,11 +132,13 @@ async fn run_gateway_aggregator(
                             skipped: skipped as usize,
                             component: "aggregator",
                         });
-                        logging::warn(
-                            "gateway.aggregator.lagged",
-                            "Gateway aggregator lagged behind source ticks",
-                            json!({ "skipped": skipped })
-                        );
+                        if let Some((total, max)) = lag_tracker.record(skipped as usize) {
+                            logging::warn(
+                                "gateway.aggregator.lagged",
+                                "Gateway aggregator lagged behind source ticks",
+                                json!({ "skipped_total": total, "max_skipped": max })
+                            );
+                        }
                     }
                     Err(broadcast::error::RecvError::Closed) => {
                         break;
@@ -128,7 +153,108 @@ async fn run_gateway_aggregator(
         }
     }
 
+    if let Some((total, max)) = lag_tracker.flush() {
+        logging::warn(
+            "gateway.aggregator.lagged",
+            "Gateway aggregator lagged behind source ticks",
+            json!({ "skipped_total": total, "max_skipped": max }),
+        );
+    }
+
+    if let Some((total, _)) = drop_tracker.flush() {
+        logging::warn(
+            "gateway.queue.full",
+            "Gateway queue saturated, dropping batches",
+            json!({ "dropped_batches": total }),
+        );
+    }
+
     logging::info_simple("gateway.aggregator.stop", "Gateway aggregator stopped");
+    Ok(())
+}
+
+pub(super) struct GatewayShutdown {
+    pub aggregator: watch::Receiver<ShutdownSignal>,
+    pub dispatcher: watch::Receiver<ShutdownSignal>,
+    pub server: watch::Receiver<ShutdownSignal>,
+}
+
+struct RateTracker {
+    total: usize,
+    max: usize,
+    window: Duration,
+    last_emit: Option<Instant>,
+}
+
+impl RateTracker {
+    fn new(window: Duration) -> Self {
+        Self {
+            total: 0,
+            max: 0,
+            window,
+            last_emit: None,
+        }
+    }
+
+    fn record(&mut self, value: usize) -> Option<(usize, usize)> {
+        self.total = self.total.saturating_add(value);
+        self.max = self.max.max(value);
+        let now = Instant::now();
+        match self.last_emit {
+            Some(last) if now.duration_since(last) >= self.window => {
+                self.last_emit = Some(now);
+                let total = std::mem::take(&mut self.total);
+                let max = std::mem::take(&mut self.max);
+                Some((total, max))
+            }
+            None => {
+                self.last_emit = Some(now);
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn flush(&mut self) -> Option<(usize, usize)> {
+        if self.total > 0 {
+            let total = std::mem::take(&mut self.total);
+            let max = std::mem::take(&mut self.max);
+            self.last_emit = Some(Instant::now());
+            Some((total, max))
+        } else {
+            None
+        }
+    }
+}
+
+async fn run_gateway_dispatcher(
+    mut queue: mpsc::Receiver<Vec<Tick>>,
+    gateway_sender: broadcast::Sender<Vec<Tick>>,
+    metrics: MetricsTx,
+    mut shutdown: watch::Receiver<ShutdownSignal>,
+) -> Result<()> {
+    logging::info_simple("gateway.dispatcher.start", "Gateway dispatcher started");
+
+    loop {
+        tokio::select! {
+            batch = queue.recv() => {
+                match batch {
+                    Some(batch) => {
+                        metrics.report(MetricsEvent::GatewayBatch { symbols: batch.len() });
+                        let _ = gateway_sender.send(batch);
+                    }
+                    None => break,
+                }
+            }
+            _ = shutdown.changed() => {
+                if !matches!(*shutdown.borrow(), ShutdownSignal::None) {
+                    break;
+                }
+            }
+        }
+    }
+
+    logging::info_simple("gateway.dispatcher.stop", "Gateway dispatcher stopped");
     Ok(())
 }
 
@@ -227,6 +353,7 @@ async fn forward_ticks_to_client(
 
     let (mut ws_sender, mut ws_receiver) = socket.split();
     let mut receiver = gateway_sender.subscribe();
+    let mut lag_tracker = RateTracker::new(Duration::from_secs(1));
 
     let reader = tokio::spawn(async move {
         while let Some(Ok(message)) = ws_receiver.next().await {
@@ -252,11 +379,13 @@ async fn forward_ticks_to_client(
                     skipped: skipped as usize,
                     component: "client",
                 });
-                logging::warn(
-                    "gateway.client.lagged",
-                    "Websocket client lagged gateway messages",
-                    json!({ "skipped": skipped }),
-                );
+                if let Some((total, max)) = lag_tracker.record(skipped as usize) {
+                    logging::warn(
+                        "gateway.client.lagged",
+                        "Websocket client lagged gateway messages",
+                        json!({ "skipped_total": total, "max_skipped": max }),
+                    );
+                }
             }
             Err(broadcast::error::RecvError::Closed) => break,
         }
@@ -264,6 +393,15 @@ async fn forward_ticks_to_client(
 
     reader.abort();
     let _ = reader.await;
+
+    if let Some((total, max)) = lag_tracker.flush() {
+        logging::warn(
+            "gateway.client.lagged",
+            "Websocket client lagged gateway messages",
+            json!({ "skipped_total": total, "max_skipped": max }),
+        );
+    }
+
     logging::info_simple(
         "gateway.client.disconnected",
         "Gateway websocket client disconnected",

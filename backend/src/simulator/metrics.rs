@@ -23,6 +23,9 @@ pub enum MetricsEvent {
         skipped: usize,
         component: &'static str,
     },
+    GatewayBackpressure {
+        dropped: usize,
+    },
 }
 
 #[derive(Clone, Default)]
@@ -57,6 +60,7 @@ async fn process_events(
     let mut gateway_symbols: usize = 0;
     let mut gateway_max_batch: usize = 0;
     let mut gateway_lag: HashMap<&'static str, (usize, usize)> = HashMap::new();
+    let mut backpressure_drops: usize = 0;
 
     let mut reporter = interval(Duration::from_secs(1));
     reporter.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -79,11 +83,14 @@ async fn process_events(
                         entry.0 = entry.0.saturating_add(1);
                         entry.1 = entry.1.saturating_add(skipped);
                     }
+                    Some(MetricsEvent::GatewayBackpressure { dropped }) => {
+                        backpressure_drops = backpressure_drops.saturating_add(dropped);
+                    }
                     None => break,
                 }
             }
             _ = reporter.tick() => {
-                if tick_batches > 0 || gateway_batches > 0 || !gateway_lag.is_empty() {
+                if tick_batches > 0 || gateway_batches > 0 || !gateway_lag.is_empty() || backpressure_drops > 0 {
                     let lag_snapshot = if gateway_lag.is_empty() {
                         Value::Null
                     } else {
@@ -111,6 +118,7 @@ async fn process_events(
                             "avg_gateway_symbols": if gateway_batches > 0 { gateway_symbols as f64 / gateway_batches as f64 } else { 0.0 },
                             "gateway_max_symbols": gateway_max_batch,
                             "gateway_lag": lag_snapshot,
+                            "gateway_backpressure_drops": backpressure_drops,
                         })
                     );
                 }
@@ -121,6 +129,7 @@ async fn process_events(
                 gateway_symbols = 0;
                 gateway_max_batch = 0;
                 gateway_lag.clear();
+                backpressure_drops = 0;
             }
             changed = shutdown.changed() => {
                 if changed.is_ok() && !matches!(*shutdown.borrow(), ShutdownSignal::None) {

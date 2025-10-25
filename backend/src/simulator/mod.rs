@@ -20,7 +20,8 @@ use tokio::sync::{broadcast, watch, RwLock};
 use tokio::time::{self, MissedTickBehavior};
 
 use crate::constants::{
-    CORRELATION_REFRESH_SECS, GATEWAY_BIND_ADDR, GATEWAY_THROTTLE_MS, SOCKET_PATH, TICK_INTERVAL_MS,
+    CORRELATION_REFRESH_SECS, GATEWAY_BIND_ADDR, GATEWAY_QUEUE_DEPTH, GATEWAY_THROTTLE_MS,
+    SOCKET_PATH, TICK_INTERVAL_MS,
 };
 use crate::logging;
 use crate::model::default_equities;
@@ -39,6 +40,7 @@ pub struct SimulatorConfig {
     pub enable_gateway: bool,
     pub gateway_addr: SocketAddr,
     pub gateway_throttle: Duration,
+    pub gateway_queue_depth: usize,
 }
 
 impl Default for SimulatorConfig {
@@ -54,6 +56,7 @@ impl Default for SimulatorConfig {
                 .parse()
                 .expect("invalid default gateway bind address"),
             gateway_throttle: Duration::from_millis(GATEWAY_THROTTLE_MS),
+            gateway_queue_depth: GATEWAY_QUEUE_DEPTH,
         }
     }
 }
@@ -93,6 +96,7 @@ pub async fn run_with_config(config: SimulatorConfig) -> Result<()> {
     let shutdown_for_ticks = shutdown_tx.subscribe();
     let shutdown_for_corr = shutdown_tx.subscribe();
     let shutdown_for_gateway_aggregator = shutdown_tx.subscribe();
+    let shutdown_for_gateway_dispatcher = shutdown_tx.subscribe();
     let shutdown_for_gateway_server = shutdown_tx.subscribe();
     let shutdown_for_metrics = shutdown_tx.subscribe();
 
@@ -111,10 +115,14 @@ pub async fn run_with_config(config: SimulatorConfig) -> Result<()> {
             gateway::run_gateway(
                 config.gateway_addr,
                 config.gateway_throttle,
+                config.gateway_queue_depth,
                 gateway_source,
                 metrics_tx.clone(),
-                shutdown_for_gateway_aggregator,
-                shutdown_for_gateway_server,
+                gateway::GatewayShutdown {
+                    aggregator: shutdown_for_gateway_aggregator,
+                    dispatcher: shutdown_for_gateway_dispatcher,
+                    server: shutdown_for_gateway_server,
+                },
             )
             .await
         } else {
