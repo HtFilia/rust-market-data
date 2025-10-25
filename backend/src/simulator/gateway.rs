@@ -17,7 +17,10 @@ use tokio::time::{interval, MissedTickBehavior};
 
 use crate::{logging, tick::Tick};
 
-use super::ShutdownSignal;
+use super::{
+    metrics::{MetricsEvent, MetricsTx},
+    ShutdownSignal,
+};
 
 #[cfg(test)]
 mod tests {
@@ -51,6 +54,7 @@ pub(super) async fn run_gateway(
     addr: SocketAddr,
     throttle: Duration,
     source_sender: broadcast::Sender<Tick>,
+    metrics: MetricsTx,
     aggregator_shutdown: watch::Receiver<ShutdownSignal>,
     server_shutdown: watch::Receiver<ShutdownSignal>,
 ) -> Result<()> {
@@ -61,9 +65,10 @@ pub(super) async fn run_gateway(
             throttle,
             source_sender.subscribe(),
             gateway_sender.clone(),
+            metrics.clone(),
             aggregator_shutdown
         ),
-        run_gateway_server(addr, gateway_sender, server_shutdown),
+        run_gateway_server(addr, gateway_sender, metrics, server_shutdown),
     )?;
 
     Ok(())
@@ -73,6 +78,7 @@ async fn run_gateway_aggregator(
     throttle: Duration,
     mut source: broadcast::Receiver<Tick>,
     gateway_sender: broadcast::Sender<Vec<Tick>>,
+    metrics: MetricsTx,
     mut shutdown: watch::Receiver<ShutdownSignal>,
 ) -> Result<()> {
     logging::info_simple("gateway.aggregator.start", "Gateway aggregator started");
@@ -88,6 +94,7 @@ async fn run_gateway_aggregator(
                 if !accumulator.is_empty() {
                     let snapshot = accumulator.snapshot();
                     if !snapshot.is_empty() {
+                        metrics.report(MetricsEvent::GatewayBatch { symbols: snapshot.len() });
                         let _ = gateway_sender.send(snapshot);
                     }
                 }
@@ -98,6 +105,10 @@ async fn run_gateway_aggregator(
                         accumulator.ingest(tick);
                     }
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        metrics.report(MetricsEvent::GatewayLag {
+                            skipped: skipped as usize,
+                            component: "aggregator",
+                        });
                         logging::warn(
                             "gateway.aggregator.lagged",
                             "Gateway aggregator lagged behind source ticks",
@@ -145,6 +156,7 @@ impl BatchAccumulator {
 async fn run_gateway_server(
     addr: SocketAddr,
     gateway_sender: broadcast::Sender<Vec<Tick>>,
+    metrics: MetricsTx,
     mut shutdown: watch::Receiver<ShutdownSignal>,
 ) -> Result<()> {
     let listener = TcpListener::bind(addr)
@@ -161,7 +173,10 @@ async fn run_gateway_server(
         "/ws",
         get({
             let gateway_sender = gateway_sender.clone();
-            move |ws: WebSocketUpgrade| websocket_upgrade(ws, gateway_sender.clone())
+            let metrics = metrics.clone();
+            move |ws: WebSocketUpgrade| {
+                websocket_upgrade(ws, gateway_sender.clone(), metrics.clone())
+            }
         }),
     );
 
@@ -185,9 +200,12 @@ async fn run_gateway_server(
 async fn websocket_upgrade(
     ws: WebSocketUpgrade,
     gateway_sender: broadcast::Sender<Vec<Tick>>,
+    metrics: MetricsTx,
 ) -> Response {
     ws.on_upgrade(move |socket| async move {
-        if let Err(err) = forward_ticks_to_client(socket, gateway_sender.clone()).await {
+        if let Err(err) =
+            forward_ticks_to_client(socket, gateway_sender.clone(), metrics.clone()).await
+        {
             logging::warn(
                 "gateway.client_error",
                 "Gateway websocket client ended with error",
@@ -200,6 +218,7 @@ async fn websocket_upgrade(
 async fn forward_ticks_to_client(
     socket: WebSocket,
     gateway_sender: broadcast::Sender<Vec<Tick>>,
+    metrics: MetricsTx,
 ) -> Result<()> {
     logging::info_simple(
         "gateway.client.connected",
@@ -229,6 +248,10 @@ async fn forward_ticks_to_client(
                 }
             }
             Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                metrics.report(MetricsEvent::GatewayLag {
+                    skipped: skipped as usize,
+                    component: "client",
+                });
                 logging::warn(
                     "gateway.client.lagged",
                     "Websocket client lagged gateway messages",

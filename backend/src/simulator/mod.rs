@@ -1,4 +1,5 @@
 mod gateway;
+mod metrics;
 mod universe;
 
 use std::io::ErrorKind;
@@ -25,6 +26,7 @@ use crate::logging;
 use crate::model::default_equities;
 use crate::tick::Tick;
 
+use metrics::{MetricsEvent, MetricsTx};
 use universe::StockUniverse;
 
 #[derive(Clone, Debug)]
@@ -92,6 +94,9 @@ pub async fn run_with_config(config: SimulatorConfig) -> Result<()> {
     let shutdown_for_corr = shutdown_tx.subscribe();
     let shutdown_for_gateway_aggregator = shutdown_tx.subscribe();
     let shutdown_for_gateway_server = shutdown_tx.subscribe();
+    let shutdown_for_metrics = shutdown_tx.subscribe();
+
+    let (metrics_tx, metrics_future) = metrics::reporter(shutdown_for_metrics);
 
     let socket_future = async {
         if config.enable_socket {
@@ -107,6 +112,7 @@ pub async fn run_with_config(config: SimulatorConfig) -> Result<()> {
                 config.gateway_addr,
                 config.gateway_throttle,
                 gateway_source,
+                metrics_tx.clone(),
                 shutdown_for_gateway_aggregator,
                 shutdown_for_gateway_server,
             )
@@ -119,10 +125,12 @@ pub async fn run_with_config(config: SimulatorConfig) -> Result<()> {
     let run_result = tokio::try_join!(
         socket_future,
         gateway_future,
+        metrics_future,
         run_tick_generator(
             Arc::clone(&config),
             Arc::clone(&universe),
             initial_prices,
+            metrics_tx.clone(),
             tick_sender,
             shutdown_tx.clone(),
             shutdown_for_ticks
@@ -191,6 +199,7 @@ async fn run_tick_generator(
     config: Arc<SimulatorConfig>,
     universe: Arc<RwLock<StockUniverse>>,
     mut prices: Vec<f64>,
+    metrics: MetricsTx,
     sender: broadcast::Sender<Tick>,
     shutdown_tx: watch::Sender<ShutdownSignal>,
     mut shutdown_rx: watch::Receiver<ShutdownSignal>,
@@ -252,6 +261,10 @@ async fn run_tick_generator(
                 }
             })
             .collect();
+
+        metrics.report(MetricsEvent::TickBatch {
+            generated: ticks.len(),
+        });
 
         emitted_ticks = emitted_ticks.saturating_add(ticks.len());
         for tick in ticks {
@@ -466,6 +479,7 @@ pub mod testkit {
             Arc::clone(&config),
             Arc::clone(&universe),
             initial_prices,
+            MetricsTx::noop(),
             tick_sender,
             shutdown_tx.clone(),
             shutdown_rx.clone(),
