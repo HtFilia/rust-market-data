@@ -9,7 +9,7 @@ pub use components::dashboard::Dashboard;
 pub use logging::init_logging;
 pub use ticks::store::TickStore;
 pub use ticks::types::{HistoryPoint, Region, Sector, Tick};
-pub use ticks::websocket::spawn_tick_stream;
+pub use ticks::websocket::{StreamStatus, connect_with_retry};
 
 /// Root component bootstrapping the dashboard.
 #[component]

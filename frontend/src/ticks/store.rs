@@ -1,8 +1,13 @@
-use std::collections::{HashMap, VecDeque};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, VecDeque},
+};
 
 use indexmap::IndexMap;
 
 use super::types::{HistoryPoint, Tick};
+
+pub type Movers = Vec<(String, f64)>;
 
 /// In-memory structure keeping the latest tick per symbol and recent history.
 #[derive(Clone)]
@@ -59,6 +64,54 @@ impl TickStore {
         self.latest.clear();
         self.history.clear();
     }
+
+    /// Return the top advancers and decliners by percentage change since their first recorded price.
+    pub fn movers(&self, count: usize) -> (Movers, Movers) {
+        if count == 0 || self.latest.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+
+        let mut changes: Vec<(String, f64)> = self
+            .latest
+            .iter()
+            .map(|(symbol, _)| {
+                let change = self
+                    .history
+                    .get(symbol)
+                    .and_then(|history| {
+                        let first = history.front()?;
+                        let last = history.back()?;
+                        if first.price > 0.0 {
+                            Some(((last.price - first.price) / first.price) * 100.0)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0.0);
+                (symbol.clone(), change)
+            })
+            .collect();
+
+        changes.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
+
+        let advancers = changes
+            .iter()
+            .filter(|(_, change)| *change > 0.0)
+            .take(count)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let mut declines = changes.clone();
+        declines.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
+
+        let decliners = declines
+            .into_iter()
+            .filter(|(_, change)| *change < 0.0)
+            .take(count)
+            .collect::<Vec<_>>();
+
+        (advancers, decliners)
+    }
 }
 
 #[cfg(test)]
@@ -111,5 +164,27 @@ mod tests {
         assert_eq!(store.latest().len(), 2);
         assert_eq!(store.latest().get("AAA").unwrap().price, 11.0);
         assert_eq!(store.latest().get("BBB").unwrap().price, 20.0);
+    }
+
+    #[test]
+    fn movers_returns_sorted_advancers_decliners() {
+        let mut store = TickStore::new(8);
+        store.ingest(sample_tick("AAA", 10.0, 1));
+        store.ingest(sample_tick("AAA", 11.0, 2));
+        store.ingest(sample_tick("BBB", 20.0, 1));
+        store.ingest(sample_tick("BBB", 18.0, 2));
+        store.ingest(sample_tick("CCC", 30.0, 1));
+        store.ingest(sample_tick("CCC", 39.0, 2));
+
+        let (advancers, decliners) = store.movers(2);
+        assert_eq!(advancers.len(), 2);
+        assert_eq!(advancers.first().unwrap().0, "CCC");
+        assert!(advancers.first().unwrap().1 > 20.0);
+        assert_eq!(advancers.last().unwrap().0, "AAA");
+        assert!(advancers.last().unwrap().1 > 5.0);
+
+        assert_eq!(decliners.len(), 1);
+        assert_eq!(decliners.first().unwrap().0, "BBB");
+        assert!(decliners.first().unwrap().1 < 0.0);
     }
 }

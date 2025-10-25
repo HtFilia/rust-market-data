@@ -3,14 +3,16 @@ use std::collections::HashSet;
 use leptos::*;
 
 use crate::{
-    TickStore,
+    StreamStatus, TickStore,
     ticks::{
         format::{region_label, sector_label},
         types::{Region, Sector, Tick},
     },
 };
 
-use super::dashboard::{FilterState, SelectedSymbolSignal, TickStoreSignal};
+use super::dashboard::{
+    ConnectionStatusSignal, FilterState, SelectedSymbolSignal, TickStoreSignal,
+};
 
 #[component]
 pub fn TickTable() -> impl IntoView {
@@ -18,6 +20,8 @@ pub fn TickTable() -> impl IntoView {
     let selected_symbol =
         use_context::<SelectedSymbolSignal>().expect("selected symbol context missing");
     let filters = use_context::<FilterState>().expect("filter state context missing");
+    let connection =
+        use_context::<ConnectionStatusSignal>().expect("connection status context missing");
     let store_signal = tick_store.0;
 
     let rows = create_memo(move |_| {
@@ -43,7 +47,30 @@ pub fn TickTable() -> impl IntoView {
             <h2>"Live Quotes"</h2>
             <Show
                 when=move || !rows.get().is_empty()
-                fallback=move || view! { <p class="tick-table__empty">"Select a region and sector to display symbols."</p> }
+                fallback=move || {
+                    let regions = filters.regions.get();
+                    let sectors = filters.sectors.get();
+                    let status = connection.0.get();
+                    let message = if regions.is_empty() && sectors.is_empty() {
+                        "Select a region and sector to display symbols.".to_string()
+                    } else {
+                        match status {
+                            StreamStatus::Connecting => "Connecting to market data...".to_string(),
+                            StreamStatus::Reconnecting { .. } => {
+                                "Reconnecting to the gateway...".to_string()
+                            }
+                            StreamStatus::Failed => {
+                                "Connection lost. Attempting to reconnect...".to_string()
+                            }
+                            StreamStatus::Connected => {
+                                "Waiting for symbols matching your filters.".to_string()
+                            }
+                            StreamStatus::Idle => "Waiting for connection...".to_string(),
+                        }
+                    };
+
+                    view! { <p class="tick-table__empty">{message}</p> }
+                }
             >
                 <table>
                     <thead>

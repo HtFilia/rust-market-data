@@ -1,7 +1,8 @@
-use std::rc::Rc;
+use std::{rc::Rc, time::Duration};
 
 use futures::StreamExt;
 use gloo_net::websocket::{Message, futures::WebSocket};
+use gloo_timers::future::sleep;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::spawn_local;
 
@@ -24,34 +25,79 @@ pub enum TickStreamError {
 
 pub type TickCallback = Rc<dyn Fn(Vec<Tick>)>;
 
-/// Connect to the tick stream and invoke `on_tick` for every parsed payload batch.
-pub fn spawn_tick_stream(url: &str, on_tick: TickCallback) -> Result<(), TickStreamError> {
-    let ws = WebSocket::open(url).map_err(|err| TickStreamError::Open(err.to_string()))?;
-    let (_, mut read) = ws.split();
-    let on_tick = on_tick.clone();
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StreamStatus {
+    Idle,
+    Connecting,
+    Connected,
+    Reconnecting { attempt: u32 },
+    Failed,
+}
 
+pub type StatusCallback = Rc<dyn Fn(StreamStatus)>;
+
+/// Connect to the tick stream with automatic reconnection and status updates.
+pub fn connect_with_retry(url: String, on_tick: TickCallback, on_status: StatusCallback) {
     spawn_local(async move {
-        while let Some(message) = read.next().await {
-            match message {
-                Ok(Message::Bytes(bytes)) => {
-                    if let Err(err) = dispatch_message(&bytes, &on_tick) {
-                        log::warn!("dropping malformed tick: {err:?}");
+        let mut attempt: u32 = 0;
+        let mut backoff_ms: u64 = 500;
+        let mut ever_connected = false;
+
+        loop {
+            if attempt == 0 || !ever_connected {
+                on_status(StreamStatus::Connecting);
+            } else {
+                on_status(StreamStatus::Reconnecting { attempt });
+            }
+
+            match WebSocket::open(&url) {
+                Ok(ws) => {
+                    attempt = 0;
+                    backoff_ms = 500;
+
+                    let (_, mut read) = ws.split();
+                    let mut announced_connected = false;
+
+                    while let Some(message) = read.next().await {
+                        match message {
+                            Ok(Message::Bytes(bytes)) => {
+                                if let Err(err) = dispatch_message(&bytes, &on_tick) {
+                                    log::warn!("dropping malformed tick: {err:?}");
+                                } else if !announced_connected {
+                                    announced_connected = true;
+                                    ever_connected = true;
+                                    on_status(StreamStatus::Connected);
+                                }
+                            }
+                            Ok(Message::Text(text)) => {
+                                if let Err(err) = dispatch_message(text.as_bytes(), &on_tick) {
+                                    log::warn!("dropping malformed tick: {err:?}");
+                                } else if !announced_connected {
+                                    announced_connected = true;
+                                    ever_connected = true;
+                                    on_status(StreamStatus::Connected);
+                                }
+                            }
+                            Err(err) => {
+                                log::warn!("websocket read error: {err:?}");
+                                break;
+                            }
+                        }
                     }
-                }
-                Ok(Message::Text(text)) => {
-                    if let Err(err) = dispatch_message(text.as_bytes(), &on_tick) {
-                        log::warn!("dropping malformed tick: {err:?}");
-                    }
+
+                    on_status(StreamStatus::Failed);
                 }
                 Err(err) => {
-                    log::error!("websocket read error: {err:?}");
-                    break;
+                    log::error!("websocket open error: {err:?}");
+                    on_status(StreamStatus::Failed);
                 }
             }
+
+            attempt = attempt.saturating_add(1);
+            sleep(Duration::from_millis(backoff_ms)).await;
+            backoff_ms = (backoff_ms * 2).min(10_000);
         }
     });
-
-    Ok(())
 }
 
 fn dispatch_message(bytes: &[u8], on_tick: &TickCallback) -> Result<(), TickStreamError> {

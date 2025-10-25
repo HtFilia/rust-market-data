@@ -1,8 +1,8 @@
 use leptos::*;
 
-use crate::ticks::types::HistoryPoint;
+use crate::{StreamStatus, ticks::types::HistoryPoint};
 
-use super::dashboard::{SelectedSymbolSignal, TickStoreSignal};
+use super::dashboard::{ConnectionStatusSignal, SelectedSymbolSignal, TickStoreSignal};
 
 const CHART_WIDTH: f64 = 620.0;
 const CHART_HEIGHT: f64 = 260.0;
@@ -26,6 +26,9 @@ pub fn HistoryChart() -> impl IntoView {
         })
     });
 
+    let status =
+        use_context::<ConnectionStatusSignal>().expect("connection status context missing");
+
     view! {
         <section class="history-chart">
             <h2>"Price History"</h2>
@@ -34,7 +37,14 @@ pub fn HistoryChart() -> impl IntoView {
                 fallback=move || {
                     history_state.get().map(|(symbol, history)| {
                         if history.is_empty() {
-                            view! { <p>"Waiting for live data for "{symbol.clone()}...</p> }
+                            let message = match status.0.get() {
+                                StreamStatus::Connecting => "Connecting to market data...".to_string(),
+                                StreamStatus::Reconnecting { .. } => "Reconnecting to the gateway...".to_string(),
+                                StreamStatus::Failed => "Connection lost. Attempting to reconnect...".to_string(),
+                                StreamStatus::Connected => format!("Waiting for live data for {symbol}..."),
+                                StreamStatus::Idle => "Waiting for connection...".to_string(),
+                            };
+                            view! { <p>{message}</p> }
                         } else {
                             view! { <p>"Collecting more samples for "{symbol.clone()}...</p> }
                         }
@@ -58,8 +68,8 @@ pub fn HistoryChart() -> impl IntoView {
                                     >
                                         <defs>
                                             <linearGradient id="priceFill" x1="0" x2="0" y1="0" y2="1">
-                                                <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.35" />
-                                                <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.02" />
+                                                <stop offset="0%" style="stop-color: var(--color-chart-fill-start); stop-opacity: 1;" />
+                                                <stop offset="100%" style="stop-color: var(--color-chart-fill-end); stop-opacity: 1;" />
                                             </linearGradient>
                                         </defs>
                                         <polyline
