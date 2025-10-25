@@ -1,50 +1,83 @@
 # Agent Guide
 
-Welcome to the `rust-market-data` workspace. Future sessions should follow the expectations below to keep both the backend simulator and frontend UI healthy.
+Welcome to the `rust-market-data` workspace. This document is the single source of truth for future automation agents. Keep it current so new contributors can come up to speed without trawling the repo history.
 
-## Project Snapshot
+## 1. Business Context & Current Capabilities
 
-- Workspace layout:
-  - `backend/` – Rust async simulator (library + binary).
-  - `frontend/` – Leptos client consuming websocket ticks.
-  - `schemas/` – JSON Schemas + samples for interop.
-- Backend generates a 500-name equity universe with `Region`/`Sector` metadata (`backend/src/model.rs`).
-- Correlation matrices come from factor loadings (`backend/src/simulator/universe.rs`).
-- Tick cadence defaults to 8 ms (`backend/src/constants.rs`) and every tick carries region/sector metadata.
-- Runtime logging is JSON-formatted via helpers in `backend/src/logging.rs`.
-- CLI entry-points live in `backend/src/cli.rs`; `backend/src/main.rs` remains a thin dispatcher.
+The project simulates a high-frequency equity market and renders it in a browser dashboard. Typical use cases are live dashboard demos, load-testing downstream consumers, and experimentation with async Rust patterns.
 
-## Daily Workflow
+- **Backend (Rust)**
+  - Generates a 500-name universe with sector/region metadata (`backend/src/model.rs`).
+  - Synthesises correlated price paths via factor loadings (`backend/src/simulator/universe.rs`).
+  - Streams newline-delimited JSON ticks over a Unix socket and emits throttled websocket batches (one snapshot per second) with versioned payloads (`backend/src/simulator/gateway.rs`).
+  - Provides JSON logging helpers (`backend/src/logging.rs`) and CLI utilities (`run`, `tail`, `chart`).
+  - Observability: periodic throughput metrics, lag/backpressure tracking, graceful signal handling.
 
-1. **Build & Lint**
-   - `cargo fmt --all` before committing code changes.
-   - `cargo clippy --workspace --all-targets -- -D warnings` (install `clippy` if missing).
-2. **Tests**
-   - `cargo test --workspace` exercises backend + frontend suites (backend integration uses `simulator::testkit`).
-   - Add coverage when behaviour changes (e.g., new CLI flags, UI interactions).
-3. **Logging**
-   - Emit structured logs through `logging::info|warn|error` helpers. Never use `println!`/`eprintln!` outside those wrappers.
+- **Frontend (Rust → WASM via Leptos)**
+  - Connects to the websocket gateway with automatic reconnect/backoff and status reporting (`frontend/src/ticks/websocket.rs`).
+  - Displays live quotes, a history chart, summary movers, and filter controls for region/sector (`frontend/src/components/*`).
+  - Supports Dark/Light/Sepia themes via CSS custom properties.
 
-## Coding Notes
+- **Interoperability**
+  - JSON Schemas for ticks, batches, and logs live in `/schemas`. Payloads are versioned (`version: 1`) to keep future changes explicit.
+  - End-to-end websocket integration test ensures simulator → gateway → client contract stability (`backend/tests/e2e_realtime.rs`).
 
-- Backend layout: simulator logic in `backend/src/simulator/`, data definitions in `backend/src/model.rs`, CLI-specific code in `backend/src/cli.rs`.
-- Frontend layout: Reactivity + components in `frontend/src/`; keep wasm-only logic behind `cfg(target_arch = "wasm32")` if needed.
-- Universe changes must keep the correlation matrix symmetric and SPD; rely on `StockUniverse::factor_based_correlation` or extend it carefully.
-- Tick generation must remain non-blocking; avoid heavy per-tick allocations.
-- Respect the existing JSON schema in `Tick`.
+## 2. Tech Stack Overview
 
-## Operations Tips
+| Layer        | Tools / Libraries                       | Notes |
+|--------------|----------------------------------------|-------|
+| Runtime      | Rust 1.78+, Tokio, Rayon, Axum (ws)    | Async multi-task execution, websocket server |
+| Math         | `nalgebra`, `rand`, `rand_distr`       | Correlated price generation |
+| Frontend WASM| Leptos 0.6 (CSR), gloo-net/timers, wasm-bindgen | Reactive components, websocket client |
+| Testing      | Cargo test, tokio-tungstenite, Playwright TBD | Integration + unit coverage |
+| Tooling      | git hooks (fmt/clippy/test), Makefile  | Automation of quality gates |
 
-- Socket path defaults to `market_ticks.sock`; alter via `SimulatorConfig` if necessary.
-- Signals: `SIGTERM` → graceful, `SIGHUP` → hot reload correlation, `SIGINT` → immediate stop. Behaviour is encoded in `backend/src/simulator/mod.rs`.
-- For quick smoke checks without sockets use `simulator::testkit::collect_ticks`.
-- Frontend development typically targets `wasm32-unknown-unknown`; use `make frontend-build` for local wasm artefacts.
+## 3. Development Workflow & Practices
 
-## Outstanding Ideas
+1. **Quality Gates** (enforced by hooks)
+   - `cargo fmt --all`
+   - `cargo clippy --workspace --all-targets -- -D warnings`
+   - `cargo test --workspace`
 
-- CLI flags for custom universe sizes / correlation tuning.
-- Metrics instrumentation (latency measurements for tick loop).
-- Benchmarks to validate throughput under the 8 ms cadence target.
-- End-to-end tests wiring websocket ticks into the frontend.
+2. **Testing Strategy**
+   - Unit tests for tick store, chart geometry, websocket deserialisation, simulator universe, etc.
+   - Integration tests using `simulator::testkit` for backend behaviour.
+   - End-to-end websocket test (`backend/tests/e2e_realtime.rs`) to guarantee batches stream as expected. Future iterations should extend this to browser-level harnesses when Playwright setup is available.
 
-Please update this file whenever the workflow or expectations change so the next agent has accurate context.
+3. **Coding Guidelines**
+   - Keep tick generation hot path allocation-free; reuse buffers where possible.
+   - Maintain SPD correlation matrices—do not shortcut the `StockUniverse` rebuild logic.
+   - All logs must go through `logging::*` helpers; avoid `println!`/`eprintln!`.
+   - Web payloads must adhere to the schemas in `/schemas`; bump `TICK_BATCH_VERSION` if the contract changes.
+   - Frontend wasm-only code must be `cfg(target_arch = "wasm32")` gated.
+
+4. **TDD Expectations**
+   - Add or update tests whenever behaviour changes (e.g., new UI state, CLI option, payload structure).
+   - Use focused unit tests for pure logic (e.g., movers calculation) and integration tests for async pipelines.
+   - Prefer writing the failing test first, then the implementation; remove any flaky async sleeps by relying on deterministic utilities (timeouts, polling).
+
+## 4. Architecture Cheat Sheet
+
+- `backend/src/simulator/mod.rs`: orchestrates tick generator, gateway queue/dispatcher, metrics reporter, and signal handling.
+- `backend/src/simulator/gateway.rs`: websocket batching, rate-limited lag/backpressure logging, queue fanout.
+- `frontend/src/components`: `dashboard.rs` wires state; `tick_table.rs`, `summary.rs`, `filters.rs`, `history_chart.rs` compose the UI.
+- `frontend/src/ticks/websocket.rs`: websocket client with exponential backoff and status callbacks.
+- `frontend/style.css`: theme palette definitions (dark/light/sepia) and layout (two-column with sticky sidebar).
+
+## 5. Running & Troubleshooting
+
+- Start backend: `make run` (or `cargo run -p rust-market-data -- run`).
+- Start frontend (during development): use `trunk serve` in `frontend/` after building.
+- Inspect ticks via CLI: `make tail` or `cargo run -p rust-market-data -- tail --symbol NAHLT000`.
+- If the websocket dashboard shows “Disconnected”, check backend logs for `gateway.*` events. Lag warnings are rate-limited; persistent drops indicate the queue depth or throttle may need tuning.
+- End-to-end test smoke: `cargo test --package rust-market-data --test e2e_realtime`.
+
+## 6. Near-Term Roadmap / Ideas
+
+- Expand e2e coverage with Playwright once installable (smoke filters, theme switch, reconnection UX).
+- Expose metrics over HTTP (Prometheus or JSON) for external monitoring.
+- Configurable universe sizing and correlation knobs via CLI flags and config files.
+- Benchmark suite to profile throughput under different throttles.
+- Optional historical persistence (e.g., to disk or SQLite) for replay.
+
+Keep this guide updated whenever architecture, workflows, or expectations shift. A clear AGENTS.md keeps future runs efficient and avoids repeating discovery work.
