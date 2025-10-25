@@ -14,9 +14,9 @@ pub enum TickStreamError {
     Deserialize(String),
 }
 
-pub type TickCallback = Rc<dyn Fn(Tick)>;
+pub type TickCallback = Rc<dyn Fn(Vec<Tick>)>;
 
-/// Connect to the tick stream and invoke `on_tick` for every parsed payload.
+/// Connect to the tick stream and invoke `on_tick` for every parsed payload batch.
 pub fn spawn_tick_stream(url: &str, on_tick: TickCallback) -> Result<(), TickStreamError> {
     let ws = WebSocket::open(url).map_err(|err| TickStreamError::Open(err.to_string()))?;
     let (_, mut read) = ws.split();
@@ -47,9 +47,11 @@ pub fn spawn_tick_stream(url: &str, on_tick: TickCallback) -> Result<(), TickStr
 }
 
 fn dispatch_message(bytes: &[u8], on_tick: &TickCallback) -> Result<(), TickStreamError> {
-    let tick: Tick = serde_json::from_slice(bytes)
+    let ticks: Vec<Tick> = serde_json::from_slice(bytes)
         .map_err(|err| TickStreamError::Deserialize(err.to_string()))?;
-    on_tick(tick);
+    if !ticks.is_empty() {
+        on_tick(ticks);
+    }
     Ok(())
 }
 

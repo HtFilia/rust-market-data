@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Geographical region of the issuer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Region {
     NorthAmerica,
@@ -11,8 +11,18 @@ pub enum Region {
     MiddleEastAfrica,
 }
 
+impl Region {
+    pub const ALL: [Region; 5] = [
+        Region::NorthAmerica,
+        Region::SouthAmerica,
+        Region::Europe,
+        Region::AsiaPacific,
+        Region::MiddleEastAfrica,
+    ];
+}
+
 /// Activity sector classification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Sector {
     Technology,
@@ -25,6 +35,21 @@ pub enum Sector {
     Utilities,
     Materials,
     RealEstate,
+}
+
+impl Sector {
+    pub const ALL: [Sector; 10] = [
+        Sector::Technology,
+        Sector::Financials,
+        Sector::Industrials,
+        Sector::Healthcare,
+        Sector::ConsumerDiscretionary,
+        Sector::ConsumerStaples,
+        Sector::Energy,
+        Sector::Utilities,
+        Sector::Materials,
+        Sector::RealEstate,
+    ];
 }
 
 /// Latest market data tick payload produced by the websocket feed.

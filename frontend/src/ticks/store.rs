@@ -32,6 +32,16 @@ impl TickStore {
         }
     }
 
+    /// Ingest a batch of ticks, updating the latest snapshot in one pass.
+    pub fn ingest_batch<I>(&mut self, ticks: I)
+    where
+        I: IntoIterator<Item = Tick>,
+    {
+        for tick in ticks {
+            self.ingest(tick);
+        }
+    }
+
     pub fn latest(&self) -> &IndexMap<String, Tick> {
         &self.latest
     }
@@ -42,6 +52,12 @@ impl TickStore {
 
     pub fn history_for(&self, symbol: &str) -> Option<&VecDeque<HistoryPoint>> {
         self.history.get(symbol)
+    }
+
+    /// Reset the store to an empty state, removing all cached ticks and history.
+    pub fn clear(&mut self) {
+        self.latest.clear();
+        self.history.clear();
     }
 }
 
@@ -81,5 +97,19 @@ mod tests {
         assert_eq!(history.len(), 2);
         assert_eq!(history.front().unwrap().price, 11.0);
         assert_eq!(history.back().unwrap().price, 12.0);
+    }
+
+    #[test]
+    fn batch_ingest_updates_multiple_symbols() {
+        let mut store = TickStore::new(4);
+        store.ingest_batch(vec![
+            sample_tick("AAA", 10.0, 1),
+            sample_tick("BBB", 20.0, 1),
+            sample_tick("AAA", 11.0, 2),
+        ]);
+
+        assert_eq!(store.latest().len(), 2);
+        assert_eq!(store.latest().get("AAA").unwrap().price, 11.0);
+        assert_eq!(store.latest().get("BBB").unwrap().price, 20.0);
     }
 }

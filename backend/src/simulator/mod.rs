@@ -1,6 +1,8 @@
+mod gateway;
 mod universe;
 
 use std::io::ErrorKind;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,7 +18,9 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::{broadcast, watch, RwLock};
 use tokio::time::{self, MissedTickBehavior};
 
-use crate::constants::{CORRELATION_REFRESH_SECS, SOCKET_PATH, TICK_INTERVAL_MS};
+use crate::constants::{
+    CORRELATION_REFRESH_SECS, GATEWAY_BIND_ADDR, GATEWAY_THROTTLE_MS, SOCKET_PATH, TICK_INTERVAL_MS,
+};
 use crate::logging;
 use crate::model::default_equities;
 use crate::tick::Tick;
@@ -30,6 +34,9 @@ pub struct SimulatorConfig {
     pub correlation_refresh: Duration,
     pub max_ticks: Option<usize>,
     pub enable_socket: bool,
+    pub enable_gateway: bool,
+    pub gateway_addr: SocketAddr,
+    pub gateway_throttle: Duration,
 }
 
 impl Default for SimulatorConfig {
@@ -40,6 +47,11 @@ impl Default for SimulatorConfig {
             correlation_refresh: Duration::from_secs(CORRELATION_REFRESH_SECS),
             max_ticks: None,
             enable_socket: true,
+            enable_gateway: true,
+            gateway_addr: GATEWAY_BIND_ADDR
+                .parse()
+                .expect("invalid default gateway bind address"),
+            gateway_throttle: Duration::from_millis(GATEWAY_THROTTLE_MS),
         }
     }
 }
@@ -66,17 +78,20 @@ pub async fn run_with_config(config: SimulatorConfig) -> Result<()> {
         .collect();
     let universe = Arc::new(RwLock::new(StockUniverse::new(equities, &mut rng)?));
 
-    let (shutdown_tx, shutdown_rx) = watch::channel(ShutdownSignal::None);
+    let (shutdown_tx, _) = watch::channel(ShutdownSignal::None);
     let (reload_tx, _) = broadcast::channel::<()>(16);
 
     let (tick_sender, _) = broadcast::channel::<Tick>(4096);
     let server_sender = tick_sender.clone();
+    let gateway_source = tick_sender.clone();
 
     let signals_task = tokio::spawn(handle_signals(shutdown_tx.clone(), reload_tx.clone()));
 
-    let shutdown_for_socket = shutdown_rx.clone();
-    let shutdown_for_ticks = shutdown_rx.clone();
-    let shutdown_for_corr = shutdown_rx;
+    let shutdown_for_socket = shutdown_tx.subscribe();
+    let shutdown_for_ticks = shutdown_tx.subscribe();
+    let shutdown_for_corr = shutdown_tx.subscribe();
+    let shutdown_for_gateway_aggregator = shutdown_tx.subscribe();
+    let shutdown_for_gateway_server = shutdown_tx.subscribe();
 
     let socket_future = async {
         if config.enable_socket {
@@ -86,8 +101,24 @@ pub async fn run_with_config(config: SimulatorConfig) -> Result<()> {
         }
     };
 
+    let gateway_future = async {
+        if config.enable_gateway {
+            gateway::run_gateway(
+                config.gateway_addr,
+                config.gateway_throttle,
+                gateway_source,
+                shutdown_for_gateway_aggregator,
+                shutdown_for_gateway_server,
+            )
+            .await
+        } else {
+            Ok(())
+        }
+    };
+
     let run_result = tokio::try_join!(
         socket_future,
+        gateway_future,
         run_tick_generator(
             Arc::clone(&config),
             Arc::clone(&universe),
@@ -414,6 +445,7 @@ pub mod testkit {
 
     pub async fn collect_ticks(mut config: SimulatorConfig, count: usize) -> Result<Vec<Tick>> {
         config.enable_socket = false;
+        config.enable_gateway = false;
         config.max_ticks = None;
 
         let config = Arc::new(config);
